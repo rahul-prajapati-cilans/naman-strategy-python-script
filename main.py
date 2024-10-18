@@ -1,10 +1,18 @@
 import numpy as np
+import os
 import pandas as pd
-import schedule
+import smtplib
+import threading
 import time
 import yfinance as yf
+from apscheduler.schedulers.blocking import BlockingScheduler
 from datetime import datetime, timedelta
+from dotenv import load_dotenv
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
+load_dotenv()
+lock = threading.Lock()
 
 stocks = [
     "AARTIIND",
@@ -92,6 +100,7 @@ stocks = [
     "ICICIGI",
     "ICICIPRULI",
     "IDEA",
+    # Not available in Yahoo Finance
     # "IDFC",
     "IDFCFIRSTB",
     "IEX",
@@ -187,9 +196,21 @@ stocks = [
     "VOLTAS",
     "WIPRO",
     "ZYDUSLIFE",
-    "^NSEI",
-    "^NSEBANK",
+    # Nifty Indexes
+    # "^NSEI",
+    # "^NSEBANK",
 ]
+
+RECEIVER_EMAILS = [
+    "kaushal.cilans@gmail.com",
+    "rahul.cilans@gmail.com",
+]
+
+COMMENT_LINE = "\n--------------------------------------------\n"
+
+INDEX_LIST = ["^NSEI", "^NSEBANK"]
+
+is_initial_breakout_running = False
 
 
 def get_previous_day_ohlc(ticker):
@@ -198,7 +219,7 @@ def get_previous_day_ohlc(ticker):
     """
 
     # If the ticker is not a Nifty index, add ".NS" to the ticker
-    if ticker not in ["^NSEI", "^NSEBANK"]:
+    if ticker not in INDEX_LIST:
         ticker = ticker + ".NS"
 
     current_day = pd.Timestamp.now().date()
@@ -212,7 +233,10 @@ def get_previous_day_ohlc(ticker):
 
     # Download the previous day's data
     previous_day_data = yf.download(
-        ticker, start=previous_day, end=previous_day + pd.Timedelta(days=1)
+        ticker,
+        start=previous_day,
+        end=previous_day + pd.Timedelta(days=1),
+        interval="1d",
     )
 
     # Extract the high and low prices
@@ -235,10 +259,37 @@ def get_current_day_stock_data(stock):
     """
     A function which collects current day's stock data
     """
-    if stock not in ["^NSEI", "^NSEBANK"]:
+    if stock not in INDEX_LIST:
         stock = stock + ".NS"
     df = yf.download(stock, period="1d")
     return df
+
+
+def ultimate_condition(
+    daily_stocks,
+    first_candle_stock_data,
+    ultimate_bullish_stocks,
+    ultimate_bearish_stocks,
+):
+    """
+    The ultimate condition for the stock to be bullish or bearish
+    """
+    print("Checking ultimate condition for the stocks")
+    if ultimate_bullish_stocks and ultimate_bearish_stocks:
+        return
+
+    for stock in daily_stocks:
+        data = first_candle_stock_data[stock]
+        if data["Open"] == data["High"]:
+            print(f"The stock {stock} is bearish")
+            ultimate_bearish_stocks.append(stock)
+        elif data["Open"] == data["Low"]:
+            print(f"The stock {stock} is bullish")
+            ultimate_bullish_stocks.append(stock)
+    print("ULTIMATE BULLISH STOCKS:", ultimate_bullish_stocks)
+    print(COMMENT_LINE)
+    print("ULTIMATE BEARISH STOCKS:", ultimate_bearish_stocks)
+    return None
 
 
 def check_opening_price_logic(
@@ -271,7 +322,7 @@ def download_data_for_initial_breakout(ticker):
     """
     print(f"Initial Breakout - Downloading data for {ticker}")
 
-    if ticker not in ["^NSEI", "^NSEBANK"]:
+    if ticker not in INDEX_LIST:
         ticker = f"{ticker}.NS"
 
     # Get the data of the stock from the start date to the current date
@@ -339,18 +390,20 @@ def get_daily_first_candle_data(stock_list, first_candle_stock_data):
     """
     Function to fetch the first candle data for a list of stocks
     """
+    print("Fetching first candle data for the day for the stocks")
     if first_candle_stock_data:
         return
 
     for ticker in stock_list:
         ticker_ = ticker
-        if ticker not in ["^NSEI", "^NSEBANK"]:
+        if ticker not in INDEX_LIST:
             ticker = f"{ticker}.NS"
         data = yf.download(ticker, period="1d", interval="15m")
         if not data.empty:
             first_candle = data.iloc[0]
             first_candle_stock_data[ticker_] = {
                 "Datetime": first_candle.name.strftime("%Y-%m-%d %H:%M:%S"),
+                "Open": first_candle["Open"],
                 "High": first_candle["High"],
                 "Low": first_candle["Low"],
             }
@@ -364,7 +417,7 @@ def download_data_for_confirmation(ticker):
     Download the data for the stock for confirmation condition
     """
 
-    if ticker not in ["^NSEI", "^NSEBANK"]:
+    if ticker not in INDEX_LIST:
         ticker = f"{ticker}.NS"
 
     confirmation_df = yf.download(ticker, period="1d", interval="1m")
@@ -508,7 +561,6 @@ def calculate_macd(dataframe, short_period=12, long_period=26, signal_period=9):
 
     Returns:
     pd.DataFrame: The DataFrame with MACD and signal columns.
-    go.Figure: The Plotly figure showing the MACD.
     """
 
     df = dataframe.copy()
@@ -538,7 +590,6 @@ def calculate_rsi(dataframe, period=14):
 
     Returns:
     pd.DataFrame: The DataFrame with the RSI and RSI_Signal columns.
-    go.Figure: The Plotly figure showing the RSI.
     """
 
     df = dataframe.copy()
@@ -570,23 +621,297 @@ def calculate_rsi(dataframe, period=14):
     return df
 
 
+def download_data_for_mprs(ticker):
+    """
+    Download the data for the stock for MPRS condition
+    """
+
+    if ticker not in INDEX_LIST:
+        ticker = f"{ticker}.NS"
+
+    current_date = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d")
+    mprs_df = yf.download(ticker, start=current_date, interval="15m")
+    return mprs_df
+
+
+def execute_bull(bullish_daily_stocks):
+    final_bullish = []
+
+    for ticker in bullish_daily_stocks:
+        mprs_df = download_data_for_mprs(ticker)
+        print(f"Processing Final Bullish for {ticker}")
+
+        # Calculate SMA and check its direction
+        sma = calculate_sma(dataframe=mprs_df)
+        sma_direction = sma["SMA_DIRECTION"].tail(1).values[0]
+        if sma_direction != 1:
+            continue  # If SMA condition is not met, skip to next stock
+        print(f"{ticker} - SMA condition met with direction: {sma_direction}")
+
+        # Calculate PSAR and check its direction
+        psar = calculate_psar(dataframe=mprs_df)
+        psar_direction = psar["PSAR_Direction"].tail(1).values[0]
+        if psar_direction != 1:
+            continue  # If PSAR condition is not met, skip to next stock
+        print(f"{ticker} - PSAR condition met with direction: {psar_direction}")
+
+        # Calculate RSI and check if it's greater than 60
+        rsi = calculate_rsi(dataframe=mprs_df)
+        rsi_value = rsi["RSI"].tail(1).values[0]
+        if rsi_value <= 60:
+            continue  # If RSI condition is not met, skip to next stock
+        print(f"{ticker} - RSI condition met with value: {rsi_value}")
+
+        # Calculate MACD and check its signal
+        macd = calculate_macd(dataframe=mprs_df)
+        macd_signal = macd["MACD_Signal"].tail(1).values[0]
+        if macd_signal <= 0:
+            continue  # If MACD condition is not met, skip to next stock
+        print(f"{ticker} - MACD condition met with signal: {macd_signal}")
+
+        # If all conditions are met, the stock is bullish
+        final_bullish.append(ticker)
+        print(f"The stock {ticker} is bullish")
+    return final_bullish
+
+
+def execute_bear(common_bear_stocks):
+    final_bearish = []
+
+    for ticker in common_bear_stocks:
+        mprs_df = download_data_for_mprs(ticker)
+        print(f"Processing Final Bearish for {ticker}")
+
+        # Calculate SMA and check its direction
+        sma = calculate_sma(dataframe=mprs_df)
+        sma_direction = sma["SMA_DIRECTION"].tail(1).values[0]
+        if sma_direction != -1:
+            continue  # If SMA condition is not met, skip to next stock
+        print(f"{ticker} - SMA condition met with direction: {sma_direction}")
+
+        # Calculate PSAR and check its direction
+        psar = calculate_psar(dataframe=mprs_df)
+        psar_direction = psar["PSAR_Direction"].tail(1).values[0]
+        if psar_direction != -1:
+            continue  # If PSAR condition is not met, skip to next stock
+        print(f"{ticker} - PSAR condition met with direction: {psar_direction}")
+
+        # Calculate RSI and check if it's less than 40
+        rsi = calculate_rsi(dataframe=mprs_df)
+        rsi_value = rsi["RSI"].tail(1).values[0]
+        if rsi_value >= 40:
+            continue  # If RSI condition is not met, skip to next stock
+        print(f"{ticker} - RSI condition met with value: {rsi_value}")
+
+        # Calculate MACD and check its signal
+        macd = calculate_macd(dataframe=mprs_df)
+        macd_signal = macd["MACD_Signal"].tail(1).values[0]
+        if macd_signal >= 0:
+            continue  # If MACD condition is not met, skip to next stock
+        print(f"{ticker} - MACD condition met with signal: {macd_signal}")
+
+        # If all conditions are met, the stock is bearish
+        final_bearish.append(ticker)
+        print(f"The stock {ticker} is bearish")
+    return final_bearish
+
+
+def handle_initial_breakout(
+    ultimate_bullish_stocks,
+    ultimate_bearish_stocks,
+    bullish_initial_breakout,
+    bearish_initial_breakout,
+    previous_day_ohlc,
+):
+    """
+    Process the initial breakout condition for both bullish and bearish stocks.
+    """
+    # Disable the confirmation job
+    global is_initial_breakout_running
+    with lock:
+        is_initial_breakout_running = True
+    try:
+        print(f"Checking initial breakout for the stocks - {datetime.now().time()}")
+        if datetime.now().time() > datetime.strptime("09:30", "%H:%M").time():
+            with lock:
+                for stock in ultimate_bullish_stocks:
+                    initial_breakout_bull(
+                        stock, bullish_initial_breakout, previous_day_ohlc[stock]
+                    )
+                for stock in ultimate_bearish_stocks:
+                    initial_breakout_bear(
+                        stock, bearish_initial_breakout, previous_day_ohlc[stock]
+                    )
+                print("BEARISH INITIAL BREAKOUT:", bearish_initial_breakout)
+                print(COMMENT_LINE)
+                print("BULLISH INITIAL BREAKOUT:", bullish_initial_breakout)
+        return None
+    finally:
+        with lock:
+            is_initial_breakout_running = False
+
+
+def handle_confirmation(
+    ultimate_bullish_stocks,
+    ultimate_bearish_stocks,
+    confirmation_bullish_stocks,
+    confirmation_bearish_stocks,
+    first_candle_stock_data,
+    bullish_initial_breakout,
+    bearish_initial_breakout,
+):
+    """
+    Process the confirmation condition for both bullish and bearish stocks.
+    """
+    if is_initial_breakout_running:
+        print("Skipping handle confirmation, initial breakout is running.")
+        return
+
+    with lock:
+        print(f"Checking confirmation for the stocks - {datetime.now().time()}")
+        if datetime.now().time() > datetime.strptime("09:33", "%H:%M").time():
+            for stock in ultimate_bullish_stocks:
+                confirmation_bull(
+                    stock,
+                    confirmation_bullish_stocks,
+                    first_candle_stock_data[stock]["High"],
+                )
+            for stock in ultimate_bearish_stocks:
+                confirmation_bear(
+                    stock,
+                    confirmation_bearish_stocks,
+                    first_candle_stock_data[stock]["Low"],
+                )
+            print("CONFIRMATION BULLISH STOCKS:", confirmation_bullish_stocks)
+            print(COMMENT_LINE)
+            print("CONFIRMATION BEARISH STOCKS:", confirmation_bearish_stocks)
+
+            common_bear_stocks = list(
+                set(bearish_initial_breakout) & set(confirmation_bearish_stocks)
+            )
+            common_bull_stocks = list(
+                set(bullish_initial_breakout) & set(confirmation_bullish_stocks)
+            )
+            print("COMMON BEAR STOCKS:", common_bear_stocks)
+            print(COMMENT_LINE)
+            print("COMMON BULL STOCKS:", common_bull_stocks)
+            final_bullish, final_bearish = handle_mprs(
+                common_bull_stocks, common_bear_stocks
+            )
+            prepare_and_send_alert(
+                final_bullish,
+                final_bearish,
+                ultimate_bullish_stocks,
+                ultimate_bearish_stocks,
+            )
+
+
+def prepare_and_send_alert(
+    final_bullish, final_bearish, ultimate_bullish_stocks, ultimate_bearish_stocks
+):
+    """
+    Prepare the stock alert message and send it via email.
+    Only sends email if at least one of the final lists contains stocks.
+    """
+    if not final_bullish and not final_bearish:
+        print("No stocks to alert. Email not sent.")
+        return
+
+    message_text = "Stock Alert:\n\n"
+
+    if final_bullish:
+        message_text += "Bullish Stocks:\n" + "\n".join(final_bullish) + "\n\n"
+    else:
+        message_text += "No Bullish Stocks at the moment.\n\n"
+
+    if final_bearish:
+        message_text += "Bearish Stocks:\n" + "\n".join(final_bearish) + "\n\n"
+    else:
+        message_text += "No Bearish Stocks at the moment.\n\n"
+
+    # Update the ultimate stocks lists
+    ultimate_bullish_stocks = list(set(ultimate_bullish_stocks) - set(final_bullish))
+    ultimate_bearish_stocks = list(set(ultimate_bearish_stocks) - set(final_bearish))
+
+    send_email(message_text)
+    return None
+
+
+def handle_mprs(bullish_stocks, bearish_stocks):
+    """
+    Process the MPRS condition for both bullish and bearish stocks.
+    """
+    final_bullish = execute_bull(bullish_stocks)
+    final_bearish = execute_bear(bearish_stocks)
+    print("FINAL BULLISH STOCKS:", final_bullish)
+    print(COMMENT_LINE)
+    print("FINAL BEARISH STOCKS:", final_bearish)
+    return final_bullish, final_bearish
+
+
+def send_email(message_text):
+    """
+    Parameters:
+    - message_text: Text message to be sent via email.
+
+    The function sets up email parameters, creates a MIME multipart message,
+    and sends the email using the smtplib library to the specified recipients.
+    """
+    print("Sending Email...")
+
+    sender_email = os.getenv("EMAIL_HOST_USER")  # Email address of the sender
+    password = os.getenv("EMAIL_HOST_PASSWORD")  # Password of the sender's email
+    subject = "Naman Alert"  # Subject of the email
+    body = message_text  # Body of the email, contains the message text
+
+    # Establish a connection with the SMTP server
+    try:
+        with smtplib.SMTP("smtp.gmail.com", 587) as server:
+            server.starttls()
+            server.login(sender_email, password)
+
+            # Iterate over each recipient and send the email
+            for receiver_email in RECEIVER_EMAILS:
+                message = MIMEMultipart()
+                message["From"] = sender_email
+                message["To"] = receiver_email
+                message["Subject"] = subject
+                message.attach(MIMEText(body, "plain"))
+                server.sendmail(sender_email, receiver_email, message.as_string())
+                print(f"Email Sent Successfully to {receiver_email}!")
+
+    except Exception as e:
+        print("Error Sending Email:", str(e))
+
+    return None
+
+
 def main():
     """
     Main function to run the script
     """
+    if stop_scheduler():
+        print("The script is not running on a weekday or outside the time range.")
+        return
     previous_day_ohlc = {}
     current_day_stock_df = {}
     bullish_daily_stocks = []
     bearish_daily_stocks = []
+    ultimate_bullish_stocks = []
+    ultimate_bearish_stocks = []
     bullish_initial_breakout = []
     bearish_initial_breakout = []
     first_candle_stock_data = {}
     confirmation_bullish_stocks = []
     confirmation_bearish_stocks = []
 
+    start_ = time.time()
     for stock in stocks:
-        previous_day_ohlc[stock] = get_previous_day_ohlc(stock)
-        current_day_stock_df[stock] = get_current_day_stock_data(stock)
+        try:
+            previous_day_ohlc[stock] = get_previous_day_ohlc(stock)
+            current_day_stock_df[stock] = get_current_day_stock_data(stock)
+        except Exception:
+            continue
         check_opening_price_logic(
             stock,
             previous_day_ohlc[stock],
@@ -594,63 +919,82 @@ def main():
             bullish_daily_stocks,
             bearish_daily_stocks,
         )
-
+    end_ = time.time()
+    print(
+        f"Time taken to process previous day OHLC, current day DF and checking 2.5% condition: {end_ - start_} seconds"
+    )
     print("BULLISH DAILY STOCKS :", bullish_daily_stocks)
+    print(COMMENT_LINE)
     print("BEARISH DAILY STOCKS :", bearish_daily_stocks)
 
-    def initial_breakout_condition():
-        if datetime.now().time() > datetime.strptime("09:30", "%H:%M").time():
-            for stock in bullish_daily_stocks:
-                initial_breakout_bull(
-                    stock, bullish_initial_breakout, previous_day_ohlc[stock]
-                )
-            for stock in bearish_daily_stocks:
-                initial_breakout_bear(
-                    stock, bearish_initial_breakout, previous_day_ohlc[stock]
-                )
-        print("BEARISH INITIAL BREAKOUT :", bearish_initial_breakout)
-        print("BULLISH INITIAL BREAKOUT :", bullish_initial_breakout)
+    # Initialize APScheduler
+    scheduler = BlockingScheduler()
 
-    def confirmation_condition():
-        if datetime.now().time() > datetime.strptime("09:31", "%H:%M").time():
-            print("Confirmation Condition")
-            for stock in bullish_daily_stocks:
-                confirmation_bull(
-                    stock,
-                    confirmation_bullish_stocks,
-                    first_candle_stock_data[stock]["High"],
-                )
-            for stock in bearish_daily_stocks:
-                confirmation_bear(
-                    stock,
-                    confirmation_bearish_stocks,
-                    first_candle_stock_data[stock]["Low"],
-                )
-        print("CONFIRMATION BULLISH STOCKS :", confirmation_bullish_stocks)
-        print("CONFIRMATION BEARISH STOCKS :", confirmation_bearish_stocks)
-        common_bear_stocks = list(
-            set(bearish_initial_breakout) & set(confirmation_bearish_stocks)
-        )
-        common_bull_stocks = list(
-            set(bullish_initial_breakout) & set(confirmation_bullish_stocks)
-        )
-        print("COMMON BEAR STOCKS :", common_bear_stocks)
-        print("COMMON BULL STOCKS :", common_bull_stocks)
-
-    schedule.every(3).minutes.do(initial_breakout_condition)
-    schedule.every(1).minute.do(
+    # Schedule tasks for breakout and confirmation checks
+    scheduler.add_job(
         get_daily_first_candle_data,
-        (bearish_daily_stocks + bullish_daily_stocks),
-        first_candle_stock_data,
+        trigger="cron",
+        hour=9,
+        minute=31,
+        args=[bearish_daily_stocks + bullish_daily_stocks, first_candle_stock_data],
     )
-    schedule.every(1).minute.do(confirmation_condition)
+
+    scheduler.add_job(
+        ultimate_condition,
+        trigger="cron",
+        hour=9,
+        minute=32,
+        args=[
+            bullish_daily_stocks + bearish_daily_stocks,
+            first_candle_stock_data,
+            ultimate_bullish_stocks,
+            ultimate_bearish_stocks,
+        ],
+    )
+
+    scheduler.add_job(
+        handle_initial_breakout,
+        trigger="cron",
+        minute="1-59/15",  # This runs at 1, 16, 31, and 46 minutes past the hour
+        args=[
+            ultimate_bullish_stocks,
+            ultimate_bearish_stocks,
+            bullish_initial_breakout,
+            bearish_initial_breakout,
+            previous_day_ohlc,
+        ],
+    )
+
+    scheduler.add_job(
+        handle_confirmation,
+        trigger="cron",
+        second=0,  # This will run at the 00th second of every minute
+        args=[
+            ultimate_bullish_stocks,
+            ultimate_bearish_stocks,
+            confirmation_bullish_stocks,
+            confirmation_bearish_stocks,
+            first_candle_stock_data,
+            bullish_initial_breakout,
+            bearish_initial_breakout,
+        ],
+    )
 
     print("Scheduler started")
-    while True:
-        # if stop_scheduler():
-        #     break
-        schedule.run_pending()
-        time.sleep(1)
+
+    # Run the scheduler in a loop
+    try:
+        while True:
+            if stop_scheduler():
+                print("Stopping the scheduler as per the condition.")
+                break
+            scheduler.start()  # This will block and run the scheduler
+    except (KeyboardInterrupt, SystemExit) as e:
+        print("Scheduler stopped")
+        scheduler.shutdown()
+        raise e
+    finally:
+        scheduler.shutdown()  # Ensure that the scheduler shuts down properly
 
 
 if __name__ == "__main__":

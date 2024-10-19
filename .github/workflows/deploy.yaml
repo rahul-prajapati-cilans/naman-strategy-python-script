@@ -1,12 +1,14 @@
-name: naman Deployment to AWS EB Production
+name: Push to EC2 and Unzip
+
 on:
   push:
     branches:
       - develop
 
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout source code
         uses: actions/checkout@v2
@@ -14,19 +16,25 @@ jobs:
       - name: Generate deployment package
         run: zip -r deploy.zip . -x '*.git*' -x '*node_modules/*'
 
-      # - name: move zip file to root directory
-      #   run: cd backend/ && mv deploy.zip ../deploy.zip
+      - name: Upload deployment package to EC2
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          echo "${EC2_KEY}" > key.pem
+          chmod 600 key.pem
+          scp -i key.pem deploy.zip $EC2_USER@$EC2_HOST:/home/$EC2_USER/
 
-      - name: Deploy to Elastic Beanstalk
-        uses: einaregilsson/beanstalk-deploy@v20
-        with:
-          aws_access_key: ${{ secrets.AWS_ACCESS_KEY }}
-          aws_secret_key: ${{ secrets.AWS_SECRET_KEY }}
-          application_name: naman-linux
-          environment_name: Naman-linux-env
-          existing_bucket_name: elasticbeanstalk-ap-south-1-637423386639
-          version_label: ${{ github.sha }}
-          region: ap-south-1
-          use_existing_version_if_available: true
-          deployment_package: deploy.zip
-          wait_for_deployment: true
+      - name: SSH into EC2 and unzip package
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          ssh -i key.pem $EC2_USER@$EC2_HOST "
+            # Unzip the deploy.zip into the target directory
+            unzip -o /home/$EC2_USER/deploy.zip -d /home/$EC2_USER/naman-strategy-python-script && \
+            # Optionally remove the zip file after extraction
+            rm /home/$EC2_USER/deploy.zip
+          "

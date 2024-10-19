@@ -1,46 +1,23 @@
-name: Push to EC2 and Unzip
-
+name: naman Deployment EC2
+ 
 on:
   push:
     branches:
       - develop
 
 jobs:
-  deploy:
-    runs-on: ubuntu-latest
+  build:
+    runs-on: self-hosted
 
     steps:
       - name: Checkout source code
         uses: actions/checkout@v2
 
-      - name: Generate deployment package
-        run: zip -r deploy.zip . -x '*.git*' -x '*node_modules/*'
-
-      - name: Set up SSH
+      - name: Manage Directory 
         run: |
-          # Create the .ssh directory
-          mkdir -p ~/.ssh
-          # Add the EC2 host to known hosts
-          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+          cd /home/ubuntu/naman-strategy-python-script
 
-      - name: Upload deployment package to EC2
-        env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
-          EC2_USER: ${{ secrets.EC2_USER }}
-          EC2_KEY: ${{ secrets.EC2_SSH_KEY }}
+      - name: Pull latest code from stag
         run: |
-          echo "${EC2_SSH_KEY}" > key.pem
-          chmod 777 key.pem
-          scp -i key.pem deploy.zip $EC2_USER@$EC2_HOST:/home/$EC2_USER/
-
-      - name: SSH into EC2 and unzip package
-        env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
-          EC2_USER: ${{ secrets.EC2_USER }}
-        run: |
-          ssh -i key.pem $EC2_USER@$EC2_HOST "
-            # Unzip the deploy.zip into the target directory
-            unzip -o /home/$EC2_USER/deploy.zip -d /home/$EC2_USER/naman-strategy-python-script && \
-            # Optionally remove the zip file after extraction
-            rm /home/$EC2_USER/deploy.zip
-          "
+          git pull https://${{ secrets.GIT_USERNAME }}:${{ secrets.GIT_TOKEN }}@github.com/rahul-prajapati-cilans/naman-strategy-python-script.git develop
+        working-directory: /home/ubuntu/naman-strategy-python-script

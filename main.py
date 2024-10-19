@@ -6,6 +6,7 @@ import threading
 import time
 import yfinance as yf
 from apscheduler.schedulers.blocking import BlockingScheduler
+from apscheduler.triggers.cron import CronTrigger
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from email.mime.multipart import MIMEMultipart
@@ -210,7 +211,10 @@ COMMENT_LINE = "\n--------------------------------------------\n"
 
 INDEX_LIST = ["^NSEI", "^NSEBANK"]
 
+
+# Global variables
 is_initial_breakout_running = False
+initial_breakout_first_run = True
 
 
 def get_previous_day_ohlc(ticker):
@@ -467,6 +471,14 @@ def stop_scheduler():
         print("Stopping scheduler: Outside the time range of 9:15 AM to 3:30 PM")
         return True
     return False
+
+
+def shutdown_scheduler(scheduler):
+    """
+    Function to shut down the scheduler
+    """
+    print("Shutting down scheduler...")
+    scheduler.shutdown()
 
 
 def calculate_psar(dataframe, start=0.02, increment=0.02, maximum=0.2):
@@ -726,8 +738,11 @@ def handle_initial_breakout(
     """
     Process the initial breakout condition for both bullish and bearish stocks.
     """
-    # Disable the confirmation job
-    global is_initial_breakout_running
+    global is_initial_breakout_running, initial_breakout_first_run
+    if initial_breakout_first_run:
+        print("First run, delaying for 2 minutes...")
+        time.sleep(120)
+        initial_breakout_first_run = False
     with lock:
         is_initial_breakout_running = True
     try:
@@ -735,10 +750,14 @@ def handle_initial_breakout(
         if datetime.now().time() > datetime.strptime("09:30", "%H:%M").time():
             with lock:
                 for stock in ultimate_bullish_stocks:
+                    if previous_day_ohlc.get(stock, None) is None:
+                        continue
                     initial_breakout_bull(
                         stock, bullish_initial_breakout, previous_day_ohlc[stock]
                     )
                 for stock in ultimate_bearish_stocks:
+                    if previous_day_ohlc.get(stock, None) is None:
+                        continue
                     initial_breakout_bear(
                         stock, bearish_initial_breakout, previous_day_ohlc[stock]
                     )
@@ -980,15 +999,17 @@ def main():
         ],
     )
 
+    scheduler.add_job(
+        shutdown_scheduler, CronTrigger(hour=15, minute=31), args=[scheduler]
+    )
+
     print("Scheduler started")
 
     # Run the scheduler in a loop
     try:
-        while True:
-            if stop_scheduler():
-                print("Stopping the scheduler as per the condition.")
-                break
-            scheduler.start()  # This will block and run the scheduler
+        if stop_scheduler():
+            return
+        scheduler.start()  # This will block and run the scheduler
     except (KeyboardInterrupt, SystemExit) as e:
         print("Scheduler stopped")
         scheduler.shutdown()

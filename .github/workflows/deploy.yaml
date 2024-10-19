@@ -22,7 +22,7 @@ jobs:
           EC2_USER: ${{ secrets.EC2_USER }}
           EC2_KEY: ${{ secrets.EC2_SSH_KEY }}
         run: |
-          echo "${EC2_KEY}" > key.pem
+          echo "${EC2_SSH_KEY}" > key.pem
           chmod 600 key.pem
           scp -i key.pem deploy.zip $EC2_USER@$EC2_HOST:/home/$EC2_USER/
 

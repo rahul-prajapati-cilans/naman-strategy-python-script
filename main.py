@@ -437,6 +437,7 @@ def get_daily_first_candle_data(stock_list, first_candle_stock_data):
     """
     Function to fetch the first candle data for a list of stocks
     """
+    start_first_candle = time.time()
     logging.info("Fetching first candle data for the day for the stocks")
     if first_candle_stock_data:
         return
@@ -456,6 +457,10 @@ def get_daily_first_candle_data(stock_list, first_candle_stock_data):
             }
         else:
             logging.info(f"No data available for {ticker}")
+    end_first_candle = time.time()
+    logging.info(
+        f"Time taken for fetching first candle data: {end_first_candle - start_first_candle} seconds."
+    )
     return None
 
 

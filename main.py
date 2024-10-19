@@ -198,8 +198,8 @@ stocks = [
     "WIPRO",
     "ZYDUSLIFE",
     # Nifty Indexes
-    # "^NSEI",
-    # "^NSEBANK",
+    "^NSEI",
+    "^NSEBANK",
 ]
 
 RECEIVER_EMAILS = [
@@ -269,6 +269,30 @@ def get_current_day_stock_data(stock):
     return df
 
 
+def check_opening_price_logic(
+    stock, ohlc_data, df, bullish_daily_stocks, bearish_daily_stocks
+):
+    """
+    Check if the opening price of the current day is within 2.5% of the previous day's closing price
+    """
+    # Extract the current day's open price
+    current_day_open = df["Open"].values[0]
+
+    # Calculate the percentage change in opening price
+    percentage_change = (
+        (current_day_open - float(ohlc_data["close"])) / float(ohlc_data["close"])
+    ) * 100
+
+    # Check if the percentage change is within the range
+    if percentage_change > -2.5 and percentage_change <= 0:
+        bullish_daily_stocks.append(stock)
+    elif percentage_change > 0 and percentage_change < 2.5:
+        bearish_daily_stocks.append(stock)
+    else:
+        print(f"The Stock {stock} is not following the condition")
+    return None
+
+
 def ultimate_condition(
     daily_stocks,
     first_candle_stock_data,
@@ -293,30 +317,6 @@ def ultimate_condition(
     print("ULTIMATE BULLISH STOCKS:", ultimate_bullish_stocks)
     print(COMMENT_LINE)
     print("ULTIMATE BEARISH STOCKS:", ultimate_bearish_stocks)
-    return None
-
-
-def check_opening_price_logic(
-    stock, ohlc_data, df, bullish_daily_stocks, bearish_daily_stocks
-):
-    """
-    Check if the opening price of the current day is within 2.5% of the previous day's closing price
-    """
-    # Extract the current day's open price
-    current_day_open = df["Open"].values[0]
-
-    # Calculate the percentage change in opening price
-    percentage_change = (
-        (current_day_open - float(ohlc_data["close"])) / float(ohlc_data["close"])
-    ) * 100
-
-    # Check if the percentage change is within the range
-    if percentage_change > -2.5 and percentage_change <= 0:
-        bullish_daily_stocks.append(stock)
-    elif percentage_change > 0 and percentage_change < 2.5:
-        bearish_daily_stocks.append(stock)
-    else:
-        print(f"The Stock {stock} is not following the condition")
     return None
 
 

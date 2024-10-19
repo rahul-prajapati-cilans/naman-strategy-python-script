@@ -16,6 +16,13 @@ jobs:
       - name: Generate deployment package
         run: zip -r deploy.zip . -x '*.git*' -x '*node_modules/*'
 
+      - name: Set up SSH
+        run: |
+          # Create the .ssh directory
+          mkdir -p ~/.ssh
+          # Add the EC2 host to known hosts
+          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
       - name: Upload deployment package to EC2
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
@@ -24,18 +31,13 @@ jobs:
         run: |
           echo "${EC2_SSH_KEY}" > key.pem
           chmod 600 key.pem
-          # Add the EC2 host to known hosts
-          ssh-keyscan -H $EC2_HOST >> ~/.ssh/known_hosts
           scp -i key.pem deploy.zip $EC2_USER@$EC2_HOST:/home/$EC2_USER/
 
       - name: SSH into EC2 and unzip package
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_USER: ${{ secrets.EC2_USER }}
-          EC2_KEY: ${{ secrets.EC2_SSH_KEY }}
         run: |
-          # Add the EC2 host to known hosts
-          ssh-keyscan -H $EC2_HOST >> ~/.ssh/known_hosts
           ssh -i key.pem $EC2_USER@$EC2_HOST "
             # Unzip the deploy.zip into the target directory
             unzip -o /home/$EC2_USER/deploy.zip -d /home/$EC2_USER/naman-strategy-python-script && \

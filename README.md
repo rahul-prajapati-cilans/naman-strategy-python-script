@@ -1,1 +1,1 @@
-# naman-strategy-python-script
+# naman-strategy-python-script .

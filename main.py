@@ -237,11 +237,17 @@ stocks = [
     "^NSEBANK",
 ]
 
-RECEIVER_EMAILS = [
+TESTING_EMAILS = [
     "kaushal.cilans@gmail.com",
     "rahul.cilans@gmail.com",
 ]
-
+CLIENT_EMAILS = [
+    "namanshah1912@gmail.com",
+    "vandanshahca@gmail.com",
+    "kabraravi15@gmail.com",
+]
+TESTING = os.getenv("TESTING", False)
+RECEIVER_EMAILS = TESTING_EMAILS if TESTING else CLIENT_EMAILS + TESTING_EMAILS
 COMMENT_LINE = "--------------------------------------------"
 COMMENT_EQUAL = "============================================"
 
@@ -251,6 +257,12 @@ INDEX_LIST = ["^NSEI", "^NSEBANK"]
 # Global variables
 is_initial_breakout_running = False
 initial_breakout_first_run = True
+ultimate_bullish_stocks = []
+ultimate_bearish_stocks = []
+bullish_initial_breakout = []
+bearish_initial_breakout = []
+confirmation_bullish_stocks = []
+confirmation_bearish_stocks = []
 
 
 def get_previous_day_ohlc(ticker):
@@ -329,18 +341,20 @@ def check_opening_price_logic(
     return None
 
 
-def ultimate_condition(
-    daily_stocks,
-    first_candle_stock_data,
-    ultimate_bullish_stocks,
-    ultimate_bearish_stocks,
-):
+def ultimate_condition(daily_stocks, first_candle_stock_data):
     """
     The ultimate condition for the stock to be bullish or bearish
     """
+    global ultimate_bullish_stocks, ultimate_bearish_stocks
     start_ultimate = time.time()
     logging.info("Checking ultimate condition for the stocks")
     if ultimate_bullish_stocks and ultimate_bearish_stocks:
+        logging.info("Ultimate condition already met. Skipping...")
+        logging.info(COMMENT_EQUAL)
+        logging.info(f"ULTIMATE BULLISH STOCKS : {ultimate_bullish_stocks}")
+        logging.info(COMMENT_LINE)
+        logging.info(f"ULTIMATE BEARISH STOCKS : {ultimate_bearish_stocks}")
+        logging.info(COMMENT_EQUAL)
         return
 
     for stock in daily_stocks:
@@ -387,11 +401,12 @@ def download_data_for_initial_breakout(ticker):
     return current_df
 
 
-def initial_breakout_bull(stock, bullish_initial_breakout, ohlc_data):
+def initial_breakout_bull(stock, ohlc_data):
     """
     Any candle during the day's 15-minute candle should break the previous day's high, including its body with a green candle.
     The candle should close above the previous day's high with a green candle.
     """
+    global bullish_initial_breakout
     if stock in bullish_initial_breakout:
         return
 
@@ -410,11 +425,12 @@ def initial_breakout_bull(stock, bullish_initial_breakout, ohlc_data):
     return None
 
 
-def initial_breakout_bear(stock, bearish_initial_breakout, ohlc_data):
+def initial_breakout_bear(stock, ohlc_data):
     """
     Any Candle during the day's 15-minute candle should break the previous day's low, including its body with a red color candle.
     The candle should close below the previous day's low with a red color candle.
     """
+    global bearish_initial_breakout
     if stock in bearish_initial_breakout:
         return
 
@@ -476,10 +492,11 @@ def download_data_for_confirmation(ticker):
     return confirmation_df
 
 
-def confirmation_bull(stock, confirmation_bullish_stocks, first_candle_high):
+def confirmation_bull(stock, first_candle_high):
     """
     The second 15-minute candle at 9:30 AM or any other candle later on should break the high of the first 9:15 AM candle of the current day.
     """
+    global confirmation_bullish_stocks
     if stock in confirmation_bullish_stocks or not first_candle_high:
         return
     df = download_data_for_confirmation(stock)
@@ -488,10 +505,11 @@ def confirmation_bull(stock, confirmation_bullish_stocks, first_candle_high):
     return None
 
 
-def confirmation_bear(stock, confirmation_bearish_stocks, first_candle_low):
+def confirmation_bear(stock, first_candle_low):
     """
     The second 15-minute candle at 9:30 AM or any other candle later on should break the low of the first 9:15 AM candle of the current day.
     """
+    global confirmation_bearish_stocks
     if stock in confirmation_bearish_stocks or not first_candle_low:
         return
     df = download_data_for_confirmation(stock)
@@ -694,10 +712,10 @@ def download_data_for_mprs(ticker):
     return mprs_df
 
 
-def execute_bull(bullish_daily_stocks):
+def execute_bull(common_bull_stocks):
     final_bullish = []
 
-    for ticker in bullish_daily_stocks:
+    for ticker in common_bull_stocks:
         mprs_df = download_data_for_mprs(ticker)
         logging.info(f"Processing Final Bullish for {ticker}")
 
@@ -718,6 +736,7 @@ def execute_bull(bullish_daily_stocks):
         # Calculate RSI and check if it's greater than 60
         rsi = calculate_rsi(dataframe=mprs_df)
         rsi_value = rsi["RSI"].tail(1).values[0]
+        logging.info(f"{ticker} - RSI value: {rsi_value}")
         if rsi_value <= 60:
             continue  # If RSI condition is not met, skip to next stock
         logging.info(f"{ticker} - RSI condition met with value: {rsi_value}")
@@ -725,6 +744,7 @@ def execute_bull(bullish_daily_stocks):
         # Calculate MACD and check its signal
         macd = calculate_macd(dataframe=mprs_df)
         macd_signal = macd["MACD_Signal"].tail(1).values[0]
+        logging.info(f"{ticker} - MACD signal: {macd_signal}")
         if macd_signal <= 0:
             continue  # If MACD condition is not met, skip to next stock
         logging.info(f"{ticker} - MACD condition met with signal: {macd_signal}")
@@ -759,6 +779,7 @@ def execute_bear(common_bear_stocks):
         # Calculate RSI and check if it's less than 40
         rsi = calculate_rsi(dataframe=mprs_df)
         rsi_value = rsi["RSI"].tail(1).values[0]
+        logging.info(f"{ticker} - RSI value: {rsi_value}")
         if rsi_value >= 40:
             continue  # If RSI condition is not met, skip to next stock
         logging.info(f"{ticker} - RSI condition met with value: {rsi_value}")
@@ -766,6 +787,7 @@ def execute_bear(common_bear_stocks):
         # Calculate MACD and check its signal
         macd = calculate_macd(dataframe=mprs_df)
         macd_signal = macd["MACD_Signal"].tail(1).values[0]
+        logging.info(f"{ticker} - MACD signal: {macd_signal}")
         if macd_signal >= 0:
             continue  # If MACD condition is not met, skip to next stock
         logging.info(f"{ticker} - MACD condition met with signal: {macd_signal}")
@@ -776,18 +798,12 @@ def execute_bear(common_bear_stocks):
     return final_bearish
 
 
-def handle_initial_breakout(
-    ultimate_bullish_stocks,
-    ultimate_bearish_stocks,
-    bullish_initial_breakout,
-    bearish_initial_breakout,
-    previous_day_ohlc,
-):
+def handle_initial_breakout(previous_day_ohlc):
     """
     Process the initial breakout condition for both bullish and bearish stocks.
     """
     start_initial = time.time()
-    global is_initial_breakout_running, initial_breakout_first_run
+    global is_initial_breakout_running, initial_breakout_first_run, ultimate_bullish_stocks, ultimate_bearish_stocks, bullish_initial_breakout, bearish_initial_breakout
     if initial_breakout_first_run:
         logging.info("First run, delaying for 2 minutes...")
         time.sleep(120)
@@ -803,15 +819,11 @@ def handle_initial_breakout(
                 for stock in ultimate_bullish_stocks:
                     if previous_day_ohlc.get(stock, None) is None:
                         continue
-                    initial_breakout_bull(
-                        stock, bullish_initial_breakout, previous_day_ohlc[stock]
-                    )
+                    initial_breakout_bull(stock, previous_day_ohlc[stock])
                 for stock in ultimate_bearish_stocks:
                     if previous_day_ohlc.get(stock, None) is None:
                         continue
-                    initial_breakout_bear(
-                        stock, bearish_initial_breakout, previous_day_ohlc[stock]
-                    )
+                    initial_breakout_bear(stock, previous_day_ohlc[stock])
                 logging.info(COMMENT_EQUAL)
                 logging.info(f"BEARISH INITIAL BREAKOUT : {bearish_initial_breakout}")
                 logging.info(COMMENT_LINE)
@@ -827,18 +839,11 @@ def handle_initial_breakout(
         )
 
 
-def handle_confirmation(
-    ultimate_bullish_stocks,
-    ultimate_bearish_stocks,
-    confirmation_bullish_stocks,
-    confirmation_bearish_stocks,
-    first_candle_stock_data,
-    bullish_initial_breakout,
-    bearish_initial_breakout,
-):
+def handle_confirmation(first_candle_stock_data):
     """
     Process the confirmation condition for both bullish and bearish stocks.
     """
+    global is_initial_breakout_running, ultimate_bullish_stocks, ultimate_bearish_stocks, bullish_initial_breakout, bearish_initial_breakout, confirmation_bearish_stocks, confirmation_bullish_stocks
     start_confirmation = time.time()
     if is_initial_breakout_running:
         logging.info("Skipping handle confirmation, initial breakout is running.")
@@ -848,17 +853,9 @@ def handle_confirmation(
         logging.info(f"Checking confirmation for the stocks - {datetime.now().time()}")
         if datetime.now().time() > datetime.strptime("09:33", "%H:%M").time():
             for stock in ultimate_bullish_stocks:
-                confirmation_bull(
-                    stock,
-                    confirmation_bullish_stocks,
-                    first_candle_stock_data[stock]["High"],
-                )
+                confirmation_bull(stock, first_candle_stock_data[stock]["High"])
             for stock in ultimate_bearish_stocks:
-                confirmation_bear(
-                    stock,
-                    confirmation_bearish_stocks,
-                    first_candle_stock_data[stock]["Low"],
-                )
+                confirmation_bear(stock, first_candle_stock_data[stock]["Low"])
             logging.info(COMMENT_EQUAL)
             logging.info(f"CONFIRMATION BULLISH STOCKS : {confirmation_bullish_stocks}")
             logging.info(COMMENT_LINE)
@@ -879,12 +876,7 @@ def handle_confirmation(
             final_bullish, final_bearish = handle_mprs(
                 common_bull_stocks, common_bear_stocks
             )
-            prepare_and_send_alert(
-                final_bullish,
-                final_bearish,
-                ultimate_bullish_stocks,
-                ultimate_bearish_stocks,
-            )
+            prepare_and_send_alert(final_bullish, final_bearish)
     end_confirmation = time.time()
     logging.info(
         f"Time taken for confirmation: {end_confirmation - start_confirmation} seconds."
@@ -892,13 +884,12 @@ def handle_confirmation(
     return None
 
 
-def prepare_and_send_alert(
-    final_bullish, final_bearish, ultimate_bullish_stocks, ultimate_bearish_stocks
-):
+def prepare_and_send_alert(final_bullish, final_bearish):
     """
     Prepare the stock alert message and send it via email.
     Only sends email if at least one of the final lists contains stocks.
     """
+    global ultimate_bullish_stocks, ultimate_bearish_stocks, bullish_initial_breakout, bearish_initial_breakout, confirmation_bullish_stocks, confirmation_bearish_stocks
     if not final_bullish and not final_bearish:
         logging.info("No stocks to alert. Email not sent.")
         return
@@ -915,20 +906,27 @@ def prepare_and_send_alert(
     else:
         message_text += "No Bearish Stocks at the moment.\n\n"
 
-    # Update the ultimate stocks lists
+    send_email(message_text)
+
     ultimate_bullish_stocks = list(set(ultimate_bullish_stocks) - set(final_bullish))
     ultimate_bearish_stocks = list(set(ultimate_bearish_stocks) - set(final_bearish))
-
-    send_email(message_text)
+    confirmation_bullish_stocks = list(
+        set(confirmation_bullish_stocks) - set(final_bullish)
+    )
+    confirmation_bearish_stocks = list(
+        set(confirmation_bearish_stocks) - set(final_bearish)
+    )
+    bullish_initial_breakout = list(set(bullish_initial_breakout) - set(final_bullish))
+    bearish_initial_breakout = list(set(bearish_initial_breakout) - set(final_bearish))
     return None
 
 
-def handle_mprs(bullish_stocks, bearish_stocks):
+def handle_mprs(common_bull_stocks, common_bear_stocks):
     """
     Process the MPRS condition for both bullish and bearish stocks.
     """
-    final_bullish = execute_bull(bullish_stocks)
-    final_bearish = execute_bear(bearish_stocks)
+    final_bullish = execute_bull(common_bull_stocks)
+    final_bearish = execute_bear(common_bear_stocks)
     logging.info(COMMENT_EQUAL)
     logging.info(f"FINAL BULLISH STOCKS : {final_bullish}")
     logging.info(COMMENT_LINE)
@@ -952,21 +950,22 @@ def send_email(message_text):
     subject = "Naman Alert"  # Subject of the email
     body = message_text  # Body of the email, contains the message text
 
+    # Join all recipient emails into a single string separated by commas
+    recipient_emails = ", ".join(RECEIVER_EMAILS)
+
     # Establish a connection with the SMTP server
     try:
         with smtplib.SMTP("smtp.gmail.com", 587) as server:
             server.starttls()
             server.login(sender_email, password)
 
-            # Iterate over each recipient and send the email
-            for receiver_email in RECEIVER_EMAILS:
-                message = MIMEMultipart()
-                message["From"] = sender_email
-                message["To"] = receiver_email
-                message["Subject"] = subject
-                message.attach(MIMEText(body, "plain"))
-                server.sendmail(sender_email, receiver_email, message.as_string())
-                logging.info(f"Email Sent Successfully to {receiver_email}!")
+            message = MIMEMultipart()
+            message["From"] = sender_email
+            message["To"] = recipient_emails
+            message["Subject"] = subject
+            message.attach(MIMEText(body, "plain"))
+            server.sendmail(sender_email, RECEIVER_EMAILS, message.as_string())
+            logging.info(f"Email Sent Successfully to {recipient_emails}!")
 
     except Exception as e:
         logging.error(f"Error Sending Email: {str(e)}")
@@ -987,28 +986,25 @@ def main():
     current_day_stock_df = {}
     bullish_daily_stocks = []
     bearish_daily_stocks = []
-    ultimate_bullish_stocks = []
-    ultimate_bearish_stocks = []
-    bullish_initial_breakout = []
-    bearish_initial_breakout = []
     first_candle_stock_data = {}
-    confirmation_bullish_stocks = []
-    confirmation_bearish_stocks = []
 
     start_ = time.time()
     for stock in stocks:
         try:
             previous_day_ohlc[stock] = get_previous_day_ohlc(stock)
             current_day_stock_df[stock] = get_current_day_stock_data(stock)
-        except Exception:
+            check_opening_price_logic(
+                stock,
+                previous_day_ohlc[stock],
+                current_day_stock_df[stock],
+                bullish_daily_stocks,
+                bearish_daily_stocks,
+            )
+        except Exception as e:
+            logging.error(
+                f"Error during processing (OHLC, DF & 2.5 percent) for {stock}: {str(e)}"
+            )
             continue
-        check_opening_price_logic(
-            stock,
-            previous_day_ohlc[stock],
-            current_day_stock_df[stock],
-            bullish_daily_stocks,
-            bearish_daily_stocks,
-        )
     end_ = time.time()
     logging.info(
         f"Time taken to process previous day OHLC, current day DF and checking 2.5 percent condition: {end_ - start_} seconds."
@@ -1026,21 +1022,19 @@ def main():
     scheduler.add_job(
         get_daily_first_candle_data,
         trigger="cron",
-        hour=11,
-        minute=44,
+        hour=9,
+        minute=31,
         args=[bearish_daily_stocks + bullish_daily_stocks, first_candle_stock_data],
     )
 
     scheduler.add_job(
         ultimate_condition,
         trigger="cron",
-        hour=11,
-        minute=45,
+        hour=9,
+        minute=32,
         args=[
             bullish_daily_stocks + bearish_daily_stocks,
             first_candle_stock_data,
-            ultimate_bullish_stocks,
-            ultimate_bearish_stocks,
         ],
     )
 
@@ -1048,28 +1042,14 @@ def main():
         handle_initial_breakout,
         trigger="cron",
         minute="1-59/15",  # This runs at 1, 16, 31, and 46 minutes past the hour
-        args=[
-            ultimate_bullish_stocks,
-            ultimate_bearish_stocks,
-            bullish_initial_breakout,
-            bearish_initial_breakout,
-            previous_day_ohlc,
-        ],
+        args=[previous_day_ohlc],
     )
 
     scheduler.add_job(
         handle_confirmation,
         trigger="cron",
         second=0,  # This will run at the 00th second of every minute
-        args=[
-            ultimate_bullish_stocks,
-            ultimate_bearish_stocks,
-            confirmation_bullish_stocks,
-            confirmation_bearish_stocks,
-            first_candle_stock_data,
-            bullish_initial_breakout,
-            bearish_initial_breakout,
-        ],
+        args=[first_candle_stock_data],
     )
 
     scheduler.add_job(
@@ -1077,8 +1057,6 @@ def main():
     )
 
     logging.info("Scheduler started")
-
-    # Run the scheduler in a loop
     try:
         if stop_scheduler():
             return

@@ -1026,16 +1026,16 @@ def main():
     scheduler.add_job(
         get_daily_first_candle_data,
         trigger="cron",
-        hour=9,
-        minute=31,
+        hour=11,
+        minute=44,
         args=[bearish_daily_stocks + bullish_daily_stocks, first_candle_stock_data],
     )
 
     scheduler.add_job(
         ultimate_condition,
         trigger="cron",
-        hour=9,
-        minute=32,
+        hour=11,
+        minute=45,
         args=[
             bullish_daily_stocks + bearish_daily_stocks,
             first_candle_stock_data,

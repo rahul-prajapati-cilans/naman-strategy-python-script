@@ -959,18 +959,17 @@ def format_message(stock, condition):
         # Get the last two rows (candles) from the DataFrame
         last_candle = stock_df.iloc[-1]
         prev_candle = stock_df.iloc[-2]
+        trigger_time = datetime.now().strftime("%Y-%m-%d %I:%M:%S")
 
         # Set SL and target based on condition
         if condition == "bullish":
             sl = prev_candle["Low"]
             target = last_candle["Close"] + (last_candle["Close"] - prev_candle["Low"])
-            trigger_time = pd.to_datetime(last_candle.name)  # Convert to datetime
         elif condition == "bearish":
             sl = prev_candle["High"]
             target = last_candle["Close"] - (prev_candle["High"] - last_candle["Close"])
-            trigger_time = pd.to_datetime(last_candle.name)  # Convert to datetime
         else:
-            sl = target = trigger_time = "Unknown"
+            sl = target = "Unknown"
 
         message = (
             f"Stock Name: {stock}\n"

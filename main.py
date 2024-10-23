@@ -263,6 +263,7 @@ bullish_initial_breakout = []
 bearish_initial_breakout = []
 confirmation_bullish_stocks = []
 confirmation_bearish_stocks = []
+mprs_dataframes = {}
 
 
 def get_previous_day_ohlc(ticker):
@@ -703,12 +704,15 @@ def download_data_for_mprs(ticker):
     """
     Download the data for the stock for MPRS condition
     """
+    global mprs_dataframes
+    ticker_ = ticker
 
     if ticker not in INDEX_LIST:
         ticker = f"{ticker}.NS"
 
     current_date = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d")
     mprs_df = yf.download(ticker, start=current_date, interval="15m")
+    mprs_dataframes[ticker_] = mprs_df
     return mprs_df
 
 
@@ -897,12 +901,18 @@ def prepare_and_send_alert(final_bullish, final_bearish):
     message_text = "Stock Alert:\n\n"
 
     if final_bullish:
-        message_text += "Bullish Stocks:\n" + "\n".join(final_bullish) + "\n\n"
+        message_text += "Bullish Stocks:\n"
+        for stock in final_bullish:
+            message_text += format_message(stock, "bullish")
+        message_text += "\n"
     else:
         message_text += "No Bullish Stocks at the moment.\n\n"
 
     if final_bearish:
-        message_text += "Bearish Stocks:\n" + "\n".join(final_bearish) + "\n\n"
+        message_text += "Bearish Stocks:\n"
+        for stock in final_bearish:
+            message_text += format_message(stock, "bearish")
+        message_text += "\n"
     else:
         message_text += "No Bearish Stocks at the moment.\n\n"
 
@@ -933,6 +943,47 @@ def handle_mprs(common_bull_stocks, common_bear_stocks):
     logging.info(f"FINAL BEARISH STOCKS : {final_bearish}")
     logging.info(COMMENT_EQUAL)
     return final_bullish, final_bearish
+
+
+def format_message(stock, condition):
+    try:
+        stock_df = mprs_dataframes.get(stock, None)
+        if stock_df is None:
+            logging.warning(f"No MPRS data available for stock: {stock}")
+            message = (
+                f"Stock : {stock}\n+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-\n\n"
+            )
+            return message
+        stock_df = stock_df.sort_index()
+
+        # Get the last two rows (candles) from the DataFrame
+        last_candle = stock_df.iloc[-1]
+        prev_candle = stock_df.iloc[-2]
+
+        # Set SL and target based on condition
+        if condition == "bullish":
+            sl = prev_candle["Low"]
+            target = last_candle["Close"] + (last_candle["Close"] - prev_candle["Low"])
+            trigger_time = pd.to_datetime(last_candle.name)  # Convert to datetime
+        elif condition == "bearish":
+            sl = prev_candle["High"]
+            target = last_candle["Close"] - (prev_candle["High"] - last_candle["Close"])
+            trigger_time = pd.to_datetime(last_candle.name)  # Convert to datetime
+        else:
+            sl = target = trigger_time = "Unknown"
+
+        message = (
+            f"Stock Name: {stock}\n"
+            f"Time of Trigger: {trigger_time}\n"
+            f"Entry Price: Rs {last_candle['Close']:.2f}\n"
+            f"SL: Rs {sl:.2f} (Low of previous candle)\n"
+            f"Target: Rs {target:.2f} (same as SL)\n"
+            f"+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-\n\n"
+        )
+        return message
+    except Exception as e:
+        logging.error(f"Error formatting message for {stock}: {str(e)}")
+        return f"Stock : {stock}\n+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-\n\n"
 
 
 def send_email(message_text):

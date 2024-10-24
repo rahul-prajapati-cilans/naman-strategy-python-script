@@ -995,6 +995,10 @@ def send_email(message_text):
     """
     logging.info("Sending Email...")
 
+    # Append the disclaimer to the message text
+    disclaimer = "⚡Disclaimer: The above data should not be considered as a Buy or Sell recommendation. The analysis has been done for educational and learning purposes only."
+    message_text += f"\n\n{disclaimer}"
+
     sender_email = os.getenv("EMAIL_HOST_USER")  # Email address of the sender
     password = os.getenv("EMAIL_HOST_PASSWORD")  # Password of the sender's email
     subject = "Naman Alert"  # Subject of the email
